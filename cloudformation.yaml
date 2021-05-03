@@ -1,0 +1,149 @@
+Parameters:
+  DataSetName:
+    AllowedPattern: "[a-z0-9\\.\\-]*"
+    ConstraintDescription: may only contain lowercase letters, numbers, and ., or - characters
+    Description: "The name of the dataset to provide filterable SNS."
+    MaxLength: '250'
+    MinLength: '1'
+    Type: String
+
+  S3SNSArn:
+    Type: String
+    Description: SNS ARN for Existing DataSet SNS
+    Default: arn:aws:sns:us-east-1:123901341784:NewGOES16Object
+
+
+
+Resources:
+  SNSTopic:
+    Properties:
+      TopicName: !Join [ "", [ !Join [ "", !Split [ ".", !Ref DataSetName ] ], "-filter_object_created" ] ]
+    Type: AWS::SNS::Topic
+
+  SNSTopicPolicy:
+    Properties:
+      Topics:
+        - !Ref SNSTopic
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+        - Sid: allowOnlySQSandLambdaSubscription
+          Effect: Allow
+          Action:
+            - sns:Subscribe
+            - sns:Receive
+          Resource: !Ref SNSTopic
+          Principal:
+            AWS: "*"
+          Condition:
+            StringEquals:
+              SNS:Protocol:
+                - sqs
+                - lambda
+    Type: AWS::SNS::TopicPolicy
+
+  S3LambdaLogs:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub /aws/lambda/${AWS::StackName}-filter-sns-lambda
+      RetentionInDays: 1
+    UpdateReplacePolicy: Delete
+    DeletionPolicy: Delete
+
+  S3Lambda:
+    DependsOn: S3LambdaLogs
+    Type: AWS::Lambda::Function
+    Properties:
+      Role: !GetAtt S3LambdaRole.Arn
+      FunctionName: !Sub ${AWS::StackName}-filter-sns-lambda
+      Code:
+        ZipFile:
+          !Sub |
+          import json, boto3, logging, os
+          logger = logging.getLogger()
+          logger.setLevel(logging.INFO)
+          TARGET_TOPIC = os.environ.get("TARGET_TOPIC", None)
+
+          def build_attributes(bucket, key, file_name):
+            message_attr = {
+              "bucket": {
+                "DataType": "String",
+                "StringValue": bucket,
+              },
+              "key": {   
+                "DataType": "String",
+                "StringValue": key,
+              },
+              "filename": {   
+                "DataType": "String",
+                "StringValue": file_name,
+              }
+            }
+            return message_attr
+
+          def lambda_handler(event, context):
+            logger.info("event: {}".format(event))
+            sns_message_string = event["Records"][0]["Sns"]["Message"]
+            sns_message = json.loads(sns_message_string)
+            s3_event = sns_message["Records"][0]["s3"]
+            bucket = s3_event["bucket"]["name"]
+            key = s3_event["object"]["key"]
+            file_name = os.path.basename(key)
+            boto3.client("sns").publish(TargetArn=TARGET_TOPIC, Message=sns_message_string, MessageAttributes=build_attributes(bucket, key, file_name))
+
+      Handler: "index.lambda_handler"
+      Runtime: python3.8
+      MemorySize: 128
+      Timeout: 60
+      Environment:
+        Variables:
+          TARGET_TOPIC: !Ref SNSTopic
+
+  S3InvokePermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      Principal: sns.amazonaws.com
+      SourceArn: !Ref S3SNSArn
+      FunctionName: !GetAtt S3Lambda.Arn
+
+  S3Subscription:
+    Type: AWS::SNS::Subscription
+    Properties:
+      Protocol: lambda
+      Endpoint: !GetAtt S3Lambda.Arn
+      TopicArn: !Ref S3SNSArn
+
+  S3LambdaRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - 'lambda.amazonaws.com'
+            Action:
+              - 'sts:AssumeRole'
+      Policies:
+        - PolicyName: root
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - 'logs:CreateLogGroup'
+                  - 'logs:CreateLogStream'
+                  - 'logs:PutLogEvents'
+                Resource: !Sub arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/${AWS::StackName}-filter-sns-lambda*
+              - Effect: Allow
+                Action:
+                  - 'sns:Publish'
+                Resource:
+                  - !Ref SNSTopic
+
+Outputs:
+  SNSTopic:
+    Description: "SQS and Lambda subscribable SNS Topic"
+    Value: !Ref SNSTopic
