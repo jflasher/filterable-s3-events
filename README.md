@@ -34,4 +34,7 @@ To only receive notifications for new ABI L2 products from any channel over the 
             - prefix: "ABI-L2-CMIPF"
 ```
 
+## Pricing
+
+The Lambda function defaults to 128mb of memory when built with the CloudFormation template. Based on running this against one dataset for a few days, the p99 and p50 Lambda execution durations are 375ms and 197ms respectively. Using [calculator.aws](https://calculator.aws/#/createCalculator/Lambda) we can estimate the monthly pricing for running this. The [NEXRAD Level II real-time data](https://registry.opendata.aws/noaa-nexrad/) open dataset sees about 3 million new object notifications a day, or 90 million per month. Plugging this into the calculator without free tier and using the p99 duration, we estimate the maximum cost for running this to be $89/month/dataset. 
 
