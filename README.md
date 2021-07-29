@@ -2,7 +2,7 @@
 
 This creates an [AWS Lambda](https://aws.amazon.com/lambda/) for adding the bucket, key, and filename as message attributes onto SNS notifications. This allows for filtering of the event notifications on the subscription side using [message filtering](https://docs.aws.amazon.com/sns/latest/dg/sns-message-filtering.html).
 
-Currently, S3 Event Notifications can be filter for [specific prefixes](https://docs.aws.amazon.com/AmazonS3/latest/userguide/notification-how-to-filtering.html) but only when setting up the notifications from S3 to SNS. This means that for public dataset buckets with N different prefixes would require N different public SNS topics with the users having to subscribe to the correct topics.
+Currently, S3 Event Notifications can be filtered for [specific prefixes](https://docs.aws.amazon.com/AmazonS3/latest/userguide/notification-how-to-filtering.html) but only when setting up the notifications from S3 to SNS. This means that for public dataset buckets with N different prefixes would require N different public SNS topics with the users having to subscribe to the correct topics.
 
 This Lambda function adds `bucket`, `key`, and `filename` as `String` message attributes onto the SNS notifications. The filename is determined using the `os.path.basename` Python function and thus subject to any existing limitations around its ability to parse the key as a path. 
 
